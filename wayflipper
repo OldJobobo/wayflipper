@@ -4,6 +4,7 @@
 
 set -euo pipefail
 
+VERSION="0.1.0"
 WAYBAR_DIR="${HOME}/.config/waybar"
 ACTIVE_CONFIG="${WAYBAR_DIR}/config.jsonc"
 ACTIVE_STYLE="${WAYBAR_DIR}/style.css"
@@ -20,6 +21,7 @@ usage() {
   cat <<'EOF'
 Usage: wayflipper <theme-name> [--dry-run] [--force] [--restart]
        wayflipper --list
+       wayflipper --version
        wayflipper --help
 
 Options:
@@ -27,6 +29,7 @@ Options:
   --dry-run    Show actions without modifying files
   --force      Overwrite backups if names collide for this run
   --restart    Restart Waybar if reload fails; default tries graceful reload
+  --version    Show version and exit
   --help       Show this help message
 EOF
 }
@@ -148,6 +151,7 @@ parse_args() {
       --dry-run) DRY_RUN=true ;;
       --force) FORCE=true ;;
       --restart) RESTART_FLAG=true ;;
+      --version) printf 'wayflipper %s\n' "${VERSION}"; exit 0 ;;
       --help) usage; exit 0 ;;
       --) shift; break ;;
       -*)

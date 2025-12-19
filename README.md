@@ -38,6 +38,7 @@ mv wayflipper ~/.local/bin/
 ```
 wayflipper <theme-name> [--dry-run] [--force] [--restart]
 wayflipper --list
+wayflipper --version
 wayflipper --help
 ```
 
@@ -46,6 +47,7 @@ wayflipper --help
 - `--dry-run` Show what would be backed up and copied without changing anything
 - `--force` Overwrite backups if a timestamped filename already exists for this run
 - `--restart` If a reload (`pkill -USR2 waybar`) fails, do a full restart (`pkill waybar && waybar &`)
+- `--version` Show the script version
 - `--help` Show usage
 
 ### Examples
