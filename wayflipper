@@ -78,24 +78,33 @@ browse_themes() {
 
   local selection=""
   if command -v fzf >/dev/null 2>&1; then
-    selection="$(printf '%s\n' "${themes[@]}" | fzf --prompt='Select Waybar theme: ' --cycle --reverse --height=50%)"
+    if ! selection="$(printf '%s\n' "${themes[@]}" | fzf --prompt='Select Waybar theme: ' --cycle --reverse --height=50% --bind 'q:abort')"; then
+      return 1
+    fi
   else
-    printf 'fzf not found; using numbered selection.\n' >&2
-    select sel in "${themes[@]}"; do
-      if [ -n "${sel:-}" ]; then
-        selection="${sel}"
+    printf 'fzf not found; using numbered selection (press q to quit).\n' >&2
+    while true; do
+      select sel in "${themes[@]}"; do
+        if [[ "${REPLY:-}" =~ ^[qQ]$ ]]; then
+          return 1
+        fi
+        if [ -n "${sel:-}" ]; then
+          selection="${sel}"
+          break 2
+        fi
+        printf 'Invalid selection. Try again or press q to quit.\n' >&2
         break
-      fi
-      printf 'Invalid selection. Try again.\n' >&2
+      done
     done
   fi
 
   if [ -z "${selection}" ]; then
-    printf 'No theme selected; exiting.\n' >&2
-    exit 1
+    printf 'No theme selected; exiting browse.\n' >&2
+    return 1
   fi
 
   THEME="${selection}"
+  return 0
 }
 
 backup_files() {
@@ -173,6 +182,56 @@ restart_waybar() {
   exit 1
 }
 
+process_theme() {
+  local theme_name="$1"
+  local backup_config=""
+  local backup_style=""
+
+  if [ -z "${theme_name}" ]; then
+    printf 'No theme specified.\n' >&2
+    usage
+    exit 1
+  fi
+
+  if [ ! -d "${THEMES_DIR}" ]; then
+    printf 'Themes directory not found: %s\n' "${THEMES_DIR}" >&2
+    exit 1
+  fi
+
+  local theme_dir="${THEMES_DIR}/${theme_name}"
+  if [ ! -d "${theme_dir}" ]; then
+    printf 'Theme not found: %s\n' "${theme_dir}" >&2
+    exit 1
+  fi
+
+  if [ ! -f "${theme_dir}/config.jsonc" ] || [ ! -f "${theme_dir}/style.css" ]; then
+    printf 'Theme is missing config.jsonc or style.css: %s\n' "${theme_dir}" >&2
+    exit 1
+  fi
+
+  if [ ! -d "${WAYBAR_DIR}" ]; then
+    if [ "${DRY_RUN}" = true ]; then
+      printf 'Would create directory: %s\n' "${WAYBAR_DIR}"
+    else
+      mkdir -p "${WAYBAR_DIR}"
+    fi
+  fi
+
+  IFS=":" read -r backup_config backup_style <<<"$(backup_files "${theme_name}")"
+
+  apply_theme "${theme_dir}"
+
+  restart_waybar
+
+  if [ "${DRY_RUN}" = true ]; then
+    printf 'Dry run complete. Theme "%s" would be applied. Backups: config=%s style=%s\n' \
+      "${theme_name}" "${backup_config:-none}" "${backup_style:-none}"
+  else
+    printf 'Theme "%s" applied. Backups: config=%s style=%s\n' \
+      "${theme_name}" "${backup_config:-none}" "${backup_style:-none}"
+  fi
+}
+
 parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -210,52 +269,15 @@ main() {
   fi
 
   if [ "${BROWSE}" = true ]; then
-    browse_themes
+    while true; do
+      if ! browse_themes; then
+        exit 0
+      fi
+      process_theme "${THEME}"
+    done
   fi
 
-  if [ -z "${THEME}" ]; then
-    printf 'No theme specified.\n' >&2
-    usage
-    exit 1
-  fi
-
-  if [ ! -d "${THEMES_DIR}" ]; then
-    printf 'Themes directory not found: %s\n' "${THEMES_DIR}" >&2
-    exit 1
-  fi
-
-  local theme_dir="${THEMES_DIR}/${THEME}"
-  if [ ! -d "${theme_dir}" ]; then
-    printf 'Theme not found: %s\n' "${theme_dir}" >&2
-    exit 1
-  fi
-
-  if [ ! -f "${theme_dir}/config.jsonc" ] || [ ! -f "${theme_dir}/style.css" ]; then
-    printf 'Theme is missing config.jsonc or style.css: %s\n' "${theme_dir}" >&2
-    exit 1
-  fi
-
-  if [ ! -d "${WAYBAR_DIR}" ]; then
-    if [ "${DRY_RUN}" = true ]; then
-      printf 'Would create directory: %s\n' "${WAYBAR_DIR}"
-    else
-      mkdir -p "${WAYBAR_DIR}"
-    fi
-  fi
-
-  IFS=":" read -r backup_config backup_style <<<"$(backup_files "${THEME}")"
-
-  apply_theme "${theme_dir}"
-
-  restart_waybar
-
-  if [ "${DRY_RUN}" = true ]; then
-    printf 'Dry run complete. Theme "%s" would be applied. Backups: config=%s style=%s\n' \
-      "${THEME}" "${backup_config:-none}" "${backup_style:-none}"
-  else
-    printf 'Theme "%s" applied. Backups: config=%s style=%s\n' \
-      "${THEME}" "${backup_config:-none}" "${backup_style:-none}"
-  fi
+  process_theme "${THEME}"
 }
 
 main "$@"
