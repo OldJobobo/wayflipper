@@ -46,7 +46,7 @@ wayflipper --help
 - `--list` List themes found in `~/.config/waybar/themes`
 - `--dry-run` Show what would be backed up and copied without changing anything
 - `--force` Overwrite backups if a timestamped filename already exists for this run
-- `--restart` If a reload (`pkill -USR2 waybar`) fails, do a full restart (`pkill waybar && waybar &`)
+- `--restart` If reload (`pkill -USR2 waybar`) fails, kill existing Waybar instances and start fresh to avoid duplicates
 - `--version` Show the script version
 - `--help` Show usage
 

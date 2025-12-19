@@ -119,28 +119,32 @@ restart_waybar() {
   if [ "${DRY_RUN}" = true ]; then
     printf 'Would attempt pkill -USR2 waybar\n'
     if [ "${RESTART_FLAG}" = true ]; then
-      printf 'Would fallback to restarting Waybar if reload fails\n'
+      printf 'Would kill existing Waybar instances and start a fresh one if reload fails\n'
     else
       printf 'Would notify to reload Waybar manually if reload fails\n'
     fi
     return
   fi
 
-  # Prefer a graceful reload (USR2); when requested, fall back to a full restart for Hyprland/Omarchy setups.
+  # Prefer graceful reload; with --restart, fall back to a clean restart to avoid duplicate Waybar instances.
   if pkill -USR2 waybar >/dev/null 2>&1; then
     printf 'Waybar reload signal sent (USR2).\n'
     return
   fi
 
   if [ "${RESTART_FLAG}" = true ]; then
-    if pkill waybar >/dev/null 2>&1; then
-      (waybar >/dev/null 2>&1 &)
-      printf 'Waybar restarted after reload signal failed.\n'
-    else
-      printf 'Could not restart Waybar automatically. Please start it manually.\n' >&2
-    fi
+    pkill waybar >/dev/null 2>&1 || true
+    # Wait briefly for processes to exit to avoid overlapping bars.
+    for _ in 1 2 3 4 5; do
+      if ! pgrep -x waybar >/dev/null 2>&1; then
+        break
+      fi
+      sleep 0.1
+    done
+    (waybar >/dev/null 2>&1 &)
+    printf 'Waybar restarted after reload signal failed.\n'
   else
-    printf 'Reload failed; please reload or restart Waybar manually.\n' >&2
+    printf 'Reload failed; re-run with --restart or reload Waybar manually to avoid duplicates.\n' >&2
   fi
 }
 
