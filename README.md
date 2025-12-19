@@ -36,7 +36,7 @@ mv wayflipper ~/.local/bin/
 
 ## Usage
 ```
-wayflipper <theme-name> [--dry-run] [--force] [--restart]
+wayflipper <theme-name> [--dry-run] [--force]
 wayflipper --list
 wayflipper --version
 wayflipper --help
@@ -46,7 +46,6 @@ wayflipper --help
 - `--list` List themes found in `~/.config/waybar/themes`
 - `--dry-run` Show what would be backed up and copied without changing anything
 - `--force` Overwrite backups if a timestamped filename already exists for this run
-- `--restart` If reload (`pkill -USR2 waybar`) fails, kill existing Waybar instances and start fresh to avoid duplicates
 - `--version` Show the script version
 - `--help` Show usage
 
@@ -55,7 +54,6 @@ wayflipper --help
 - Preview a switch: `wayflipper V6.e --dry-run`
 - Apply a theme: `wayflipper V6.e`
 - Apply and force overwriting same-timestamp backups: `wayflipper V6.e --force`
-- Apply and restart Waybar when reload isn’t supported: `wayflipper V6.e --restart`
 
 ## Backup behavior
 - If the active files exist, they are copied to:
@@ -67,6 +65,5 @@ wayflipper --help
 - If a backup with the same timestamped name exists and `--force` is not set, the run aborts safely.
 
 ## Notes on reload/restart
-- The script first tries a graceful Waybar reload with `pkill -USR2 waybar`.
-- If you pass `--restart`, it falls back to killing and relaunching Waybar when reload fails.
-- Without `--restart`, if reload fails you’ll be reminded to reload/restart manually.
+- The script calls `omarchy-restart-waybar` after applying a theme. Ensure it is installed/available in `PATH`; otherwise the script exits with an error.
+- In `--dry-run`, it only reports the command it would run.

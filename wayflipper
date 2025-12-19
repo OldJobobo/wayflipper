@@ -13,13 +13,12 @@ LAST_SWITCH_FILE="${WAYBAR_DIR}/.last-theme-switch"
 
 DRY_RUN=false
 FORCE=false
-RESTART_FLAG=false
 LIST_ONLY=false
 THEME=""
 
 usage() {
   cat <<'EOF'
-Usage: wayflipper <theme-name> [--dry-run] [--force] [--restart]
+Usage: wayflipper <theme-name> [--dry-run] [--force]
        wayflipper --list
        wayflipper --version
        wayflipper --help
@@ -28,7 +27,6 @@ Options:
   --list       List available themes in ~/.config/waybar/themes
   --dry-run    Show actions without modifying files
   --force      Overwrite backups if names collide for this run
-  --restart    Restart Waybar if reload fails; default tries graceful reload
   --version    Show version and exit
   --help       Show this help message
 EOF
@@ -117,35 +115,17 @@ apply_theme() {
 
 restart_waybar() {
   if [ "${DRY_RUN}" = true ]; then
-    printf 'Would attempt pkill -USR2 waybar\n'
-    if [ "${RESTART_FLAG}" = true ]; then
-      printf 'Would kill existing Waybar instances and start a fresh one if reload fails\n'
-    else
-      printf 'Would notify to reload Waybar manually if reload fails\n'
-    fi
+    printf 'Would run omarchy-restart-waybar\n'
     return
   fi
 
-  # Prefer graceful reload; with --restart, fall back to a clean restart to avoid duplicate Waybar instances.
-  if pkill -USR2 waybar >/dev/null 2>&1; then
-    printf 'Waybar reload signal sent (USR2).\n'
+  if command -v omarchy-restart-waybar >/dev/null 2>&1; then
+    omarchy-restart-waybar
     return
   fi
 
-  if [ "${RESTART_FLAG}" = true ]; then
-    pkill waybar >/dev/null 2>&1 || true
-    # Wait briefly for processes to exit to avoid overlapping bars.
-    for _ in 1 2 3 4 5; do
-      if ! pgrep -x waybar >/dev/null 2>&1; then
-        break
-      fi
-      sleep 0.1
-    done
-    (waybar >/dev/null 2>&1 &)
-    printf 'Waybar restarted after reload signal failed.\n'
-  else
-    printf 'Reload failed; re-run with --restart or reload Waybar manually to avoid duplicates.\n' >&2
-  fi
+  printf 'omarchy-restart-waybar not found. Install it or reload Waybar manually.\n' >&2
+  exit 1
 }
 
 parse_args() {
@@ -154,7 +134,6 @@ parse_args() {
       --list) LIST_ONLY=true ;;
       --dry-run) DRY_RUN=true ;;
       --force) FORCE=true ;;
-      --restart) RESTART_FLAG=true ;;
       --version) printf 'wayflipper %s\n' "${VERSION}"; exit 0 ;;
       --help) usage; exit 0 ;;
       --) shift; break ;;
