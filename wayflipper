@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+# wayflipper - Waybar theme switcher for Omarchy
+# Expected structure: ~/.config/waybar/themes/<theme-name>/{config.jsonc,style.css}
+
+set -euo pipefail
+
+WAYBAR_DIR="${HOME}/.config/waybar"
+ACTIVE_CONFIG="${WAYBAR_DIR}/config.jsonc"
+ACTIVE_STYLE="${WAYBAR_DIR}/style.css"
+THEMES_DIR="${WAYBAR_DIR}/themes"
+LAST_SWITCH_FILE="${WAYBAR_DIR}/.last-theme-switch"
+
+DRY_RUN=false
+FORCE=false
+RESTART_FLAG=false
+LIST_ONLY=false
+THEME=""
+
+usage() {
+  cat <<'EOF'
+Usage: wayflipper <theme-name> [--dry-run] [--force] [--restart]
+       wayflipper --list
+       wayflipper --help
+
+Options:
+  --list       List available themes in ~/.config/waybar/themes
+  --dry-run    Show actions without modifying files
+  --force      Overwrite backups if names collide for this run
+  --restart    Restart Waybar if reload fails; default tries graceful reload
+  --help       Show this help message
+EOF
+}
+
+list_themes() {
+  if [ ! -d "${THEMES_DIR}" ]; then
+    printf 'No themes directory found at %s\n' "${THEMES_DIR}" >&2
+    exit 1
+  fi
+
+  local found=false
+  for dir in "${THEMES_DIR}"/*; do
+    [ -d "${dir}" ] || continue
+    if [ -f "${dir}/config.jsonc" ] && [ -f "${dir}/style.css" ]; then
+      printf '%s\n' "$(basename "${dir}")"
+      found=true
+    fi
+  done
+
+  if [ "${found}" = false ]; then
+    printf 'No valid themes (config.jsonc and style.css) found in %s\n' "${THEMES_DIR}" >&2
+    exit 1
+  fi
+}
+
+backup_files() {
+  local theme_name="$1"
+  local timestamp backup_config backup_style
+  timestamp="$(date '+%Y%m%d-%H%M%S')"
+  backup_config=""
+  backup_style=""
+
+  if [ -f "${ACTIVE_CONFIG}" ]; then
+    backup_config="config.jsonc.bak-${timestamp}"
+    local backup_path="${WAYBAR_DIR}/${backup_config}"
+    if [ -e "${backup_path}" ] && [ "${FORCE}" = false ]; then
+      printf 'Backup already exists: %s (use --force to overwrite)\n' "${backup_path}" >&2
+      exit 1
+    fi
+    if [ "${DRY_RUN}" = true ]; then
+      printf 'Would back up %s to %s\n' "${ACTIVE_CONFIG}" "${backup_path}"
+    else
+      cp -p -f "${ACTIVE_CONFIG}" "${backup_path}"
+    fi
+  fi
+
+  if [ -f "${ACTIVE_STYLE}" ]; then
+    backup_style="style.css.bak-${timestamp}"
+    local backup_path_style="${WAYBAR_DIR}/${backup_style}"
+    if [ -e "${backup_path_style}" ] && [ "${FORCE}" = false ]; then
+      printf 'Backup already exists: %s (use --force to overwrite)\n' "${backup_path_style}" >&2
+      exit 1
+    fi
+    if [ "${DRY_RUN}" = true ]; then
+      printf 'Would back up %s to %s\n' "${ACTIVE_STYLE}" "${backup_path_style}"
+    else
+      cp -p -f "${ACTIVE_STYLE}" "${backup_path_style}"
+    fi
+  fi
+
+  if [ "${DRY_RUN}" = true ]; then
+    printf 'Would write pointer file %s\n' "${LAST_SWITCH_FILE}"
+  else
+    cat >"${LAST_SWITCH_FILE}" <<EOF
+theme=${theme_name}
+backup_timestamp=${timestamp}
+backup_config=${backup_config}
+backup_style=${backup_style}
+EOF
+  fi
+
+  printf '%s\n' "${backup_config}:${backup_style}"
+}
+
+apply_theme() {
+  local theme_dir="$1"
+  if [ "${DRY_RUN}" = true ]; then
+    printf 'Would copy %s to %s\n' "${theme_dir}/config.jsonc" "${ACTIVE_CONFIG}"
+    printf 'Would copy %s to %s\n' "${theme_dir}/style.css" "${ACTIVE_STYLE}"
+  else
+    cp -p -f "${theme_dir}/config.jsonc" "${ACTIVE_CONFIG}"
+    cp -p -f "${theme_dir}/style.css" "${ACTIVE_STYLE}"
+  fi
+}
+
+restart_waybar() {
+  if [ "${DRY_RUN}" = true ]; then
+    printf 'Would attempt pkill -USR2 waybar\n'
+    if [ "${RESTART_FLAG}" = true ]; then
+      printf 'Would fallback to restarting Waybar if reload fails\n'
+    else
+      printf 'Would notify to reload Waybar manually if reload fails\n'
+    fi
+    return
+  fi
+
+  # Prefer a graceful reload (USR2); when requested, fall back to a full restart for Hyprland/Omarchy setups.
+  if pkill -USR2 waybar >/dev/null 2>&1; then
+    printf 'Waybar reload signal sent (USR2).\n'
+    return
+  fi
+
+  if [ "${RESTART_FLAG}" = true ]; then
+    if pkill waybar >/dev/null 2>&1; then
+      (waybar >/dev/null 2>&1 &)
+      printf 'Waybar restarted after reload signal failed.\n'
+    else
+      printf 'Could not restart Waybar automatically. Please start it manually.\n' >&2
+    fi
+  else
+    printf 'Reload failed; please reload or restart Waybar manually.\n' >&2
+  fi
+}
+
+parse_args() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --list) LIST_ONLY=true ;;
+      --dry-run) DRY_RUN=true ;;
+      --force) FORCE=true ;;
+      --restart) RESTART_FLAG=true ;;
+      --help) usage; exit 0 ;;
+      --) shift; break ;;
+      -*)
+        printf 'Unknown option: %s\n' "$1" >&2
+        usage
+        exit 1
+        ;;
+      *)
+        if [ -n "${THEME}" ]; then
+          printf 'Multiple themes specified. Only one theme is allowed.\n' >&2
+          usage
+          exit 1
+        fi
+        THEME="$1"
+        ;;
+    esac
+    shift
+  done
+}
+
+main() {
+  parse_args "$@"
+
+  if [ "${LIST_ONLY}" = true ]; then
+    list_themes
+    exit 0
+  fi
+
+  if [ -z "${THEME}" ]; then
+    printf 'No theme specified.\n' >&2
+    usage
+    exit 1
+  fi
+
+  if [ ! -d "${THEMES_DIR}" ]; then
+    printf 'Themes directory not found: %s\n' "${THEMES_DIR}" >&2
+    exit 1
+  fi
+
+  local theme_dir="${THEMES_DIR}/${THEME}"
+  if [ ! -d "${theme_dir}" ]; then
+    printf 'Theme not found: %s\n' "${theme_dir}" >&2
+    exit 1
+  fi
+
+  if [ ! -f "${theme_dir}/config.jsonc" ] || [ ! -f "${theme_dir}/style.css" ]; then
+    printf 'Theme is missing config.jsonc or style.css: %s\n' "${theme_dir}" >&2
+    exit 1
+  fi
+
+  if [ ! -d "${WAYBAR_DIR}" ]; then
+    if [ "${DRY_RUN}" = true ]; then
+      printf 'Would create directory: %s\n' "${WAYBAR_DIR}"
+    else
+      mkdir -p "${WAYBAR_DIR}"
+    fi
+  fi
+
+  IFS=":" read -r backup_config backup_style <<<"$(backup_files "${THEME}")"
+
+  apply_theme "${theme_dir}"
+
+  restart_waybar
+
+  if [ "${DRY_RUN}" = true ]; then
+    printf 'Dry run complete. Theme "%s" would be applied. Backups: config=%s style=%s\n' \
+      "${THEME}" "${backup_config:-none}" "${backup_style:-none}"
+  else
+    printf 'Theme "%s" applied. Backups: config=%s style=%s\n' \
+      "${THEME}" "${backup_config:-none}" "${backup_style:-none}"
+  fi
+}
+
+main "$@"
