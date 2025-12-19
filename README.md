@@ -40,10 +40,12 @@ wayflipper <theme-name> [--dry-run] [--force]
 wayflipper --list
 wayflipper --version
 wayflipper --help
+wayflipper --browse [--dry-run] [--force]
 ```
 
 ### Options
 - `--list` List themes found in `~/.config/waybar/themes`
+- `--browse` Interactive selector for themes (uses `fzf` if available, otherwise a numbered prompt)
 - `--dry-run` Show what would be backed up and copied without changing anything
 - `--force` Overwrite backups if a timestamped filename already exists for this run
 - `--version` Show the script version
@@ -54,6 +56,7 @@ wayflipper --help
 - Preview a switch: `wayflipper V6.e --dry-run`
 - Apply a theme: `wayflipper V6.e`
 - Apply and force overwriting same-timestamp backups: `wayflipper V6.e --force`
+- Browse and apply interactively: `wayflipper --browse`
 
 ## Backup behavior
 - If the active files exist, they are copied to:

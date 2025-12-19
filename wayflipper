@@ -14,6 +14,7 @@ LAST_SWITCH_FILE="${WAYBAR_DIR}/.last-theme-switch"
 DRY_RUN=false
 FORCE=false
 LIST_ONLY=false
+BROWSE=false
 THEME=""
 
 usage() {
@@ -22,9 +23,11 @@ Usage: wayflipper <theme-name> [--dry-run] [--force]
        wayflipper --list
        wayflipper --version
        wayflipper --help
+       wayflipper --browse [--dry-run] [--force]
 
 Options:
   --list       List available themes in ~/.config/waybar/themes
+  --browse     Interactive selector for themes (fzf if available, else numbered prompt)
   --dry-run    Show actions without modifying files
   --force      Overwrite backups if names collide for this run
   --version    Show version and exit
@@ -51,6 +54,48 @@ list_themes() {
     printf 'No valid themes (config.jsonc and style.css) found in %s\n' "${THEMES_DIR}" >&2
     exit 1
   fi
+}
+
+browse_themes() {
+  if [ ! -d "${THEMES_DIR}" ]; then
+    printf 'No themes directory found at %s\n' "${THEMES_DIR}" >&2
+    exit 1
+  fi
+
+  local themes=()
+  local dir
+  for dir in "${THEMES_DIR}"/*; do
+    [ -d "${dir}" ] || continue
+    if [ -f "${dir}/config.jsonc" ] && [ -f "${dir}/style.css" ]; then
+      themes+=("$(basename "${dir}")")
+    fi
+  done
+
+  if [ "${#themes[@]}" -eq 0 ]; then
+    printf 'No valid themes (config.jsonc and style.css) found in %s\n' "${THEMES_DIR}" >&2
+    exit 1
+  fi
+
+  local selection=""
+  if command -v fzf >/dev/null 2>&1; then
+    selection="$(printf '%s\n' "${themes[@]}" | fzf --prompt='Select Waybar theme: ' --cycle --reverse --height=50%)"
+  else
+    printf 'fzf not found; using numbered selection.\n' >&2
+    select sel in "${themes[@]}"; do
+      if [ -n "${sel:-}" ]; then
+        selection="${sel}"
+        break
+      fi
+      printf 'Invalid selection. Try again.\n' >&2
+    done
+  fi
+
+  if [ -z "${selection}" ]; then
+    printf 'No theme selected; exiting.\n' >&2
+    exit 1
+  fi
+
+  THEME="${selection}"
 }
 
 backup_files() {
@@ -132,6 +177,7 @@ parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --list) LIST_ONLY=true ;;
+      --browse) BROWSE=true ;;
       --dry-run) DRY_RUN=true ;;
       --force) FORCE=true ;;
       --version) printf 'wayflipper %s\n' "${VERSION}"; exit 0 ;;
@@ -161,6 +207,10 @@ main() {
   if [ "${LIST_ONLY}" = true ]; then
     list_themes
     exit 0
+  fi
+
+  if [ "${BROWSE}" = true ]; then
+    browse_themes
   fi
 
   if [ -z "${THEME}" ]; then
