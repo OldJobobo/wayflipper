@@ -4,23 +4,26 @@
 
 set -euo pipefail
 
-VERSION="0.1.1"
+VERSION="0.1.2"
 WAYBAR_DIR="${HOME}/.config/waybar"
 ACTIVE_CONFIG="${WAYBAR_DIR}/config.jsonc"
 ACTIVE_STYLE="${WAYBAR_DIR}/style.css"
 THEMES_DIR="${WAYBAR_DIR}/themes"
 LAST_SWITCH_FILE="${WAYBAR_DIR}/.last-theme-switch"
+BACKUP_DIR="${WAYBAR_DIR}/backups"
 
 DRY_RUN=false
 FORCE=false
 LIST_ONLY=false
 BROWSE=false
+PURGE_BACKUPS=false
 THEME=""
 
 usage() {
   cat <<'EOF'
 Usage: wayflipper <theme-name> [--dry-run] [--force]
        wayflipper --list
+       wayflipper --purge [--dry-run]
        wayflipper --version
        wayflipper --help
        wayflipper --browse [--dry-run] [--force]
@@ -28,6 +31,7 @@ Usage: wayflipper <theme-name> [--dry-run] [--force]
 Options:
   --list       List available themes in ~/.config/waybar/themes
   --browse     Interactive selector for themes (fzf if available, else numbered prompt)
+  --purge      Delete Waybar backup files in ~/.config/waybar/backups
   --dry-run    Show actions without modifying files
   --force      Overwrite backups if names collide for this run
   --version    Show version and exit
@@ -114,9 +118,17 @@ backup_files() {
   backup_config=""
   backup_style=""
 
+  if [ ! -d "${BACKUP_DIR}" ]; then
+    if [ "${DRY_RUN}" = true ]; then
+      printf 'Would create backup directory: %s\n' "${BACKUP_DIR}"
+    else
+      mkdir -p "${BACKUP_DIR}"
+    fi
+  fi
+
   if [ -f "${ACTIVE_CONFIG}" ]; then
     backup_config="config.jsonc.bak-${timestamp}"
-    local backup_path="${WAYBAR_DIR}/${backup_config}"
+    local backup_path="${BACKUP_DIR}/${backup_config}"
     if [ -e "${backup_path}" ] && [ "${FORCE}" = false ]; then
       printf 'Backup already exists: %s (use --force to overwrite)\n' "${backup_path}" >&2
       exit 1
@@ -130,7 +142,7 @@ backup_files() {
 
   if [ -f "${ACTIVE_STYLE}" ]; then
     backup_style="style.css.bak-${timestamp}"
-    local backup_path_style="${WAYBAR_DIR}/${backup_style}"
+    local backup_path_style="${BACKUP_DIR}/${backup_style}"
     if [ -e "${backup_path_style}" ] && [ "${FORCE}" = false ]; then
       printf 'Backup already exists: %s (use --force to overwrite)\n' "${backup_path_style}" >&2
       exit 1
@@ -154,6 +166,33 @@ EOF
   fi
 
   printf '%s\n' "${backup_config}:${backup_style}"
+}
+
+purge_backups() {
+  if [ ! -d "${BACKUP_DIR}" ]; then
+    printf 'No backup directory found at %s\n' "${BACKUP_DIR}"
+    return 0
+  fi
+
+  local backups=()
+  local file
+  for file in "${BACKUP_DIR}"/config.jsonc.bak-* "${BACKUP_DIR}"/style.css.bak-*; do
+    [ -e "${file}" ] || continue
+    backups+=("${file}")
+  done
+
+  if [ "${#backups[@]}" -eq 0 ]; then
+    printf 'No backup files found in %s\n' "${BACKUP_DIR}"
+    return 0
+  fi
+
+  if [ "${DRY_RUN}" = true ]; then
+    printf 'Would delete %s backup file(s) from %s\n' "${#backups[@]}" "${BACKUP_DIR}"
+    return 0
+  fi
+
+  rm -f -- "${backups[@]}"
+  printf 'Deleted %s backup file(s) from %s\n' "${#backups[@]}" "${BACKUP_DIR}"
 }
 
 apply_theme() {
@@ -237,6 +276,7 @@ parse_args() {
     case "$1" in
       --list) LIST_ONLY=true ;;
       --browse) BROWSE=true ;;
+      --purge) PURGE_BACKUPS=true ;;
       --dry-run) DRY_RUN=true ;;
       --force) FORCE=true ;;
       --version) printf 'wayflipper %s\n' "${VERSION}"; exit 0 ;;
@@ -265,6 +305,11 @@ main() {
 
   if [ "${LIST_ONLY}" = true ]; then
     list_themes
+    exit 0
+  fi
+
+  if [ "${PURGE_BACKUPS}" = true ]; then
+    purge_backups
     exit 0
   fi
 
