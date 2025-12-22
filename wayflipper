@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.1.2"
+VERSION="0.1.3"
 WAYBAR_DIR="${HOME}/.config/waybar"
 ACTIVE_CONFIG="${WAYBAR_DIR}/config.jsonc"
 ACTIVE_STYLE="${WAYBAR_DIR}/style.css"
