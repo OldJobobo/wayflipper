@@ -195,6 +195,45 @@ purge_backups() {
   printf 'Deleted %s backup file(s) from %s\n' "${#backups[@]}" "${BACKUP_DIR}"
 }
 
+count_backup_files() {
+  if [ ! -d "${BACKUP_DIR}" ]; then
+    printf '0\n'
+    return 0
+  fi
+
+  local count=0
+  local file
+  for file in "${BACKUP_DIR}"/config.jsonc.bak-* "${BACKUP_DIR}"/style.css.bak-*; do
+    [ -e "${file}" ] || continue
+    count=$((count + 1))
+  done
+
+  printf '%s\n' "${count}"
+}
+
+prompt_purge_backups_if_needed() {
+  local backup_count
+  backup_count="$(count_backup_files)"
+
+  if [ "${backup_count}" -le 100 ]; then
+    return 0
+  fi
+
+  printf 'Found %s backup file(s) in %s. Purge old backups now? [y/N]: ' \
+    "${backup_count}" "${BACKUP_DIR}"
+  local response=""
+  read -r response
+  case "${response}" in
+    [yY]|[yY][eE][sS])
+      purge_backups
+      printf 'Backup purge complete. Continuing browse.\n'
+      ;;
+    *)
+      printf 'Keeping existing backups. Continuing browse.\n'
+      ;;
+  esac
+}
+
 apply_theme() {
   local theme_dir="$1"
   if [ "${DRY_RUN}" = true ]; then
@@ -314,6 +353,7 @@ main() {
   fi
 
   if [ "${BROWSE}" = true ]; then
+    prompt_purge_backups_if_needed
     while true; do
       if ! browse_themes; then
         exit 0
