@@ -61,6 +61,7 @@ list_themes() {
 }
 
 browse_themes() {
+  local last_selection="${1:-}"
   if [ ! -d "${THEMES_DIR}" ]; then
     printf 'No themes directory found at %s\n' "${THEMES_DIR}" >&2
     exit 1
@@ -82,7 +83,85 @@ browse_themes() {
 
   local selection=""
   if command -v fzf >/dev/null 2>&1; then
-    if ! selection="$(printf '%s\n' "${themes[@]}" | fzf --prompt='Select Waybar theme: ' --cycle --reverse --height=50% --bind 'q:abort')"; then
+    local pos_found=""
+    if [ -n "${last_selection}" ]; then
+      local pos=1
+      local theme
+      for theme in "${themes[@]}"; do
+        if [ "${theme}" = "${last_selection}" ]; then
+          pos_found="${pos}"
+          break
+        fi
+        pos=$((pos + 1))
+      done
+    fi
+    local preview_cmd
+    preview_cmd=$(cat <<EOF
+bash -c '
+theme_dir="${THEMES_DIR}/{}"
+image=""
+for img in "\${theme_dir}"/*.png "\${theme_dir}"/*.PNG; do
+  [ -e "\${img}" ] || continue
+  image="\${img}"
+  break
+done
+preview_cols="\${FZF_PREVIEW_COLUMNS:-80}"
+preview_lines="\${FZF_PREVIEW_LINES:-20}"
+image_lines=\$((preview_lines * 40 / 100))
+if [ "\${image_lines}" -lt 6 ]; then
+  image_lines=6
+fi
+if [ -n "\${image}" ]; then
+  pad_lines=0
+  if command -v chafa >/dev/null 2>&1; then
+    chafa -f symbols -s "\${preview_cols}x\${image_lines}" "\${image}"
+    pad_lines=0
+  elif command -v kitty >/dev/null 2>&1 && [ -n "\${KITTY_WINDOW_ID:-}" ]; then
+    kitty +kitten icat --clear --transfer-mode=stream --stdin=no \
+      --place="\${preview_cols}x\${image_lines}@0x0" --scale-up "\${image}"
+    pad_lines=\${image_lines}
+  else
+    printf "Image preview requires chafa or kitty: %s\n" "\${image}"
+    pad_lines=1
+  fi
+  if [ "\${pad_lines}" -gt 0 ]; then
+    i=0
+    while [ "\${i}" -lt "\${pad_lines}" ]; do
+      printf "\n"
+      i=\$((i + 1))
+    done
+  fi
+else
+  if command -v kitty >/dev/null 2>&1 && [ -n "\${KITTY_WINDOW_ID:-}" ]; then
+    kitty +kitten icat --clear --transfer-mode=stream --stdin=no
+  fi
+  printf "No preview image found in %s\n" "\${theme_dir}"
+fi
+printf "\n---\n"
+printf "Theme: %s\n\n" "{}"
+printf "=== config.jsonc ===\n"
+if command -v bat >/dev/null 2>&1; then
+  bat --paging=never --color=always --style=plain --language json \
+    --line-range 1:120 "\${theme_dir}/config.jsonc"
+else
+  sed -n "1,120p" "\${theme_dir}/config.jsonc"
+fi
+printf "\n=== style.css ===\n"
+if command -v bat >/dev/null 2>&1; then
+  bat --paging=never --color=always --style=plain --language css \
+    --line-range 1:120 "\${theme_dir}/style.css"
+else
+  sed -n "1,120p" "\${theme_dir}/style.css"
+fi
+'
+EOF
+)
+    if [ -n "${pos_found}" ]; then
+      fzf_bind="q:abort,result:pos(${pos_found})"
+    else
+      fzf_bind="q:abort"
+    fi
+    if ! selection="$(printf '%s\n' "${themes[@]}" | fzf --ansi --sync --prompt='Select Waybar theme: ' --cycle --reverse --bind "${fzf_bind}" --border --border-label="Wayflipper v${VERSION}" --preview="${preview_cmd}" --preview-window='right:75%:wrap:border')"; then
       return 1
     fi
   else
@@ -354,10 +433,12 @@ main() {
 
   if [ "${BROWSE}" = true ]; then
     prompt_purge_backups_if_needed
+    local last_selection=""
     while true; do
-      if ! browse_themes; then
+      if ! browse_themes "${last_selection}"; then
         exit 0
       fi
+      last_selection="${THEME}"
       process_theme "${THEME}"
     done
   fi
