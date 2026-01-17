@@ -1,42 +1,96 @@
 #!/usr/bin/env bash
 # wayflipper - Waybar theme switcher for Omarchy
-# Expected structure: ~/.config/waybar/themes/<theme-name>/{config.jsonc,style.css}
+# Expected structure: themes_dir/<theme-name>/{config.jsonc,style.css}
 
 set -euo pipefail
 
 VERSION="0.1.3"
+CONFIG_FILE="${HOME}/.wayflipper"
 WAYBAR_DIR="${HOME}/.config/waybar"
+DEFAULT_THEMES_DIR="${HOME}/.config/waybar/themes"
+THEMES_DIR="${DEFAULT_THEMES_DIR}"
 ACTIVE_CONFIG="${WAYBAR_DIR}/config.jsonc"
 ACTIVE_STYLE="${WAYBAR_DIR}/style.css"
-THEMES_DIR="${WAYBAR_DIR}/themes"
-LAST_SWITCH_FILE="${WAYBAR_DIR}/.last-theme-switch"
-BACKUP_DIR="${WAYBAR_DIR}/backups"
 
 DRY_RUN=false
-FORCE=false
 LIST_ONLY=false
 BROWSE=false
-PURGE_BACKUPS=false
 THEME=""
 
 usage() {
   cat <<'EOF'
-Usage: wayflipper <theme-name> [--dry-run] [--force]
+Usage: wayflipper <theme-name> [--dry-run]
        wayflipper --list
-       wayflipper --purge [--dry-run]
        wayflipper --version
        wayflipper --help
-       wayflipper --browse [--dry-run] [--force]
+       wayflipper --browse [--dry-run]
 
 Options:
-  --list       List available themes in ~/.config/waybar/themes
-  --browse     Interactive selector for themes (fzf if available, else numbered prompt)
-  --purge      Delete Waybar backup files in ~/.config/waybar/backups
-  --dry-run    Show actions without modifying files
-  --force      Overwrite backups if names collide for this run
-  --version    Show version and exit
-  --help       Show this help message
+  -l, --list      List available themes in themes_dir (default ~/.config/waybar/themes)
+  -b, --browse    Interactive selector for themes (fzf if available, else numbered prompt)
+  --dry-run       Show actions without modifying files
+  -v, --version   Show version and exit
+  -h, --help      Show this help message
 EOF
+}
+
+write_default_config() {
+  cat >"${CONFIG_FILE}" <<EOF
+# wayflipper configuration
+themes_dir=${DEFAULT_THEMES_DIR}
+EOF
+}
+
+ensure_config() {
+  if [ -f "${CONFIG_FILE}" ]; then
+    return 0
+  fi
+
+  if [ "${DRY_RUN}" = true ]; then
+    printf 'Would create config file: %s\n' "${CONFIG_FILE}"
+    return 0
+  fi
+
+  write_default_config
+}
+
+load_config() {
+  THEMES_DIR="${DEFAULT_THEMES_DIR}"
+
+  if [ -f "${CONFIG_FILE}" ]; then
+    local line key value
+    while IFS= read -r line; do
+      case "${line}" in
+        ""|\#*) continue ;;
+      esac
+      if [[ "${line}" != *=* ]]; then
+        continue
+      fi
+      key="${line%%=*}"
+      value="${line#*=}"
+      value="${value#"${value%%[![:space:]]*}"}"
+      value="${value%"${value##*[![:space:]]}"}"
+      case "${key}" in
+        themes_dir)
+          if [ -n "${value}" ]; then
+            case ${value} in
+              \~)
+                value="${HOME}"
+                ;;
+              \~/*)
+                value="${HOME}/${value#~/}"
+                ;;
+            esac
+            THEMES_DIR="${value}"
+          fi
+          ;;
+      esac
+    done <"${CONFIG_FILE}"
+  fi
+
+  if [ -n "${WAYFLIPPER_THEMES_DIR:-}" ]; then
+    THEMES_DIR="${WAYFLIPPER_THEMES_DIR}"
+  fi
 }
 
 list_themes() {
@@ -190,140 +244,6 @@ EOF
   return 0
 }
 
-backup_files() {
-  local theme_name="$1"
-  local timestamp backup_config backup_style
-  timestamp="$(date '+%Y%m%d-%H%M%S')"
-  backup_config=""
-  backup_style=""
-
-  if [ ! -d "${BACKUP_DIR}" ]; then
-    if [ "${DRY_RUN}" = true ]; then
-      printf 'Would create backup directory: %s\n' "${BACKUP_DIR}"
-    else
-      mkdir -p "${BACKUP_DIR}"
-    fi
-  fi
-
-  if [ -f "${ACTIVE_CONFIG}" ]; then
-    backup_config="config.jsonc.bak-${timestamp}"
-    local backup_path="${BACKUP_DIR}/${backup_config}"
-    if [ -e "${backup_path}" ] && [ "${FORCE}" = false ]; then
-      printf 'Backup already exists: %s (use --force to overwrite)\n' "${backup_path}" >&2
-      exit 1
-    fi
-    if [ "${DRY_RUN}" = true ]; then
-      printf 'Would back up %s to %s\n' "${ACTIVE_CONFIG}" "${backup_path}"
-    else
-      cp -p -f "${ACTIVE_CONFIG}" "${backup_path}"
-    fi
-  fi
-
-  if [ -f "${ACTIVE_STYLE}" ]; then
-    backup_style="style.css.bak-${timestamp}"
-    local backup_path_style="${BACKUP_DIR}/${backup_style}"
-    if [ -e "${backup_path_style}" ] && [ "${FORCE}" = false ]; then
-      printf 'Backup already exists: %s (use --force to overwrite)\n' "${backup_path_style}" >&2
-      exit 1
-    fi
-    if [ "${DRY_RUN}" = true ]; then
-      printf 'Would back up %s to %s\n' "${ACTIVE_STYLE}" "${backup_path_style}"
-    else
-      cp -p -f "${ACTIVE_STYLE}" "${backup_path_style}"
-    fi
-  fi
-
-  if [ "${DRY_RUN}" = true ]; then
-    printf 'Would write pointer file %s\n' "${LAST_SWITCH_FILE}"
-  else
-    cat >"${LAST_SWITCH_FILE}" <<EOF
-theme=${theme_name}
-backup_timestamp=${timestamp}
-backup_config=${backup_config}
-backup_style=${backup_style}
-EOF
-  fi
-
-  printf '%s\n' "${backup_config}:${backup_style}"
-}
-
-purge_backups() {
-  if [ ! -d "${BACKUP_DIR}" ]; then
-    printf 'No backup directory found at %s\n' "${BACKUP_DIR}"
-    return 0
-  fi
-
-  local backups=()
-  local file
-  for file in "${BACKUP_DIR}"/config.jsonc.bak-* "${BACKUP_DIR}"/style.css.bak-*; do
-    [ -e "${file}" ] || continue
-    backups+=("${file}")
-  done
-
-  if [ "${#backups[@]}" -eq 0 ]; then
-    printf 'No backup files found in %s\n' "${BACKUP_DIR}"
-    return 0
-  fi
-
-  if [ "${DRY_RUN}" = true ]; then
-    printf 'Would delete %s backup file(s) from %s\n' "${#backups[@]}" "${BACKUP_DIR}"
-    return 0
-  fi
-
-  rm -f -- "${backups[@]}"
-  printf 'Deleted %s backup file(s) from %s\n' "${#backups[@]}" "${BACKUP_DIR}"
-}
-
-count_backup_files() {
-  if [ ! -d "${BACKUP_DIR}" ]; then
-    printf '0\n'
-    return 0
-  fi
-
-  local count=0
-  local file
-  for file in "${BACKUP_DIR}"/config.jsonc.bak-* "${BACKUP_DIR}"/style.css.bak-*; do
-    [ -e "${file}" ] || continue
-    count=$((count + 1))
-  done
-
-  printf '%s\n' "${count}"
-}
-
-prompt_purge_backups_if_needed() {
-  local backup_count
-  backup_count="$(count_backup_files)"
-
-  if [ "${backup_count}" -le 100 ]; then
-    return 0
-  fi
-
-  printf 'Found %s backup file(s) in %s. Purge old backups now? [y/N]: ' \
-    "${backup_count}" "${BACKUP_DIR}"
-  local response=""
-  read -r response
-  case "${response}" in
-    [yY]|[yY][eE][sS])
-      purge_backups
-      printf 'Backup purge complete. Continuing browse.\n'
-      ;;
-    *)
-      printf 'Keeping existing backups. Continuing browse.\n'
-      ;;
-  esac
-}
-
-apply_theme() {
-  local theme_dir="$1"
-  if [ "${DRY_RUN}" = true ]; then
-    printf 'Would copy %s to %s\n' "${theme_dir}/config.jsonc" "${ACTIVE_CONFIG}"
-    printf 'Would copy %s to %s\n' "${theme_dir}/style.css" "${ACTIVE_STYLE}"
-  else
-    cp -p -f "${theme_dir}/config.jsonc" "${ACTIVE_CONFIG}"
-    cp -p -f "${theme_dir}/style.css" "${ACTIVE_STYLE}"
-  fi
-}
-
 restart_waybar() {
   if [ "${DRY_RUN}" = true ]; then
     printf 'Would run omarchy-restart-waybar\n'
@@ -339,10 +259,66 @@ restart_waybar() {
   exit 1
 }
 
+backup_existing_waybar_theme() {
+  local backup_dir="${THEMES_DIR}/existing-backup"
+  local backup_config="${backup_dir}/config.jsonc"
+  local backup_style="${backup_dir}/style.css"
+  local needs_backup=false
+
+  if [ -e "${ACTIVE_CONFIG}" ] && [ ! -L "${ACTIVE_CONFIG}" ]; then
+    needs_backup=true
+  fi
+  if [ -e "${ACTIVE_STYLE}" ] && [ ! -L "${ACTIVE_STYLE}" ]; then
+    needs_backup=true
+  fi
+
+  if [ "${needs_backup}" = false ]; then
+    return 0
+  fi
+
+  if [ -e "${backup_config}" ] || [ -e "${backup_style}" ]; then
+    printf 'Existing Waybar files detected; backup theme already exists at %s\n' "${backup_dir}" >&2
+    printf 'Move or rename it, then retry.\n' >&2
+    exit 1
+  fi
+
+  if [ "${DRY_RUN}" = true ]; then
+    printf 'Would create backup theme directory: %s\n' "${backup_dir}"
+    if [ -e "${ACTIVE_CONFIG}" ] && [ ! -L "${ACTIVE_CONFIG}" ]; then
+      printf 'Would move %s to %s\n' "${ACTIVE_CONFIG}" "${backup_config}"
+    fi
+    if [ -e "${ACTIVE_STYLE}" ] && [ ! -L "${ACTIVE_STYLE}" ]; then
+      printf 'Would move %s to %s\n' "${ACTIVE_STYLE}" "${backup_style}"
+    fi
+    return 0
+  fi
+
+  mkdir -p "${backup_dir}"
+  if [ -e "${ACTIVE_CONFIG}" ] && [ ! -L "${ACTIVE_CONFIG}" ]; then
+    mv -f "${ACTIVE_CONFIG}" "${backup_config}"
+  fi
+  if [ -e "${ACTIVE_STYLE}" ] && [ ! -L "${ACTIVE_STYLE}" ]; then
+    mv -f "${ACTIVE_STYLE}" "${backup_style}"
+  fi
+}
+
+apply_theme_symlinks() {
+  local theme_dir="$1"
+  local config_path="${theme_dir}/config.jsonc"
+  local style_path="${theme_dir}/style.css"
+
+  if [ "${DRY_RUN}" = true ]; then
+    printf 'Would symlink %s to %s\n' "${config_path}" "${ACTIVE_CONFIG}"
+    printf 'Would symlink %s to %s\n' "${style_path}" "${ACTIVE_STYLE}"
+    return
+  fi
+
+  ln -sfn "${config_path}" "${ACTIVE_CONFIG}"
+  ln -sfn "${style_path}" "${ACTIVE_STYLE}"
+}
+
 process_theme() {
   local theme_name="$1"
-  local backup_config=""
-  local backup_style=""
 
   if [ -z "${theme_name}" ]; then
     printf 'No theme specified.\n' >&2
@@ -374,31 +350,27 @@ process_theme() {
     fi
   fi
 
-  IFS=":" read -r backup_config backup_style <<<"$(backup_files "${theme_name}")"
-
-  apply_theme "${theme_dir}"
-
+  backup_existing_waybar_theme
+  apply_theme_symlinks "${theme_dir}"
   restart_waybar
 
   if [ "${DRY_RUN}" = true ]; then
-    printf 'Dry run complete. Theme "%s" would be applied. Backups: config=%s style=%s\n' \
-      "${theme_name}" "${backup_config:-none}" "${backup_style:-none}"
+    printf 'Dry run complete. Theme "%s" would symlink into %s\n' \
+      "${theme_name}" "${WAYBAR_DIR}"
   else
-    printf 'Theme "%s" applied. Backups: config=%s style=%s\n' \
-      "${theme_name}" "${backup_config:-none}" "${backup_style:-none}"
+    printf 'Theme "%s" applied. Waybar symlinks point to %s\n' \
+      "${theme_name}" "${theme_dir}"
   fi
 }
 
 parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
-      --list) LIST_ONLY=true ;;
-      --browse) BROWSE=true ;;
-      --purge) PURGE_BACKUPS=true ;;
+      -l|--list) LIST_ONLY=true ;;
+      -b|--browse) BROWSE=true ;;
       --dry-run) DRY_RUN=true ;;
-      --force) FORCE=true ;;
-      --version) printf 'wayflipper %s\n' "${VERSION}"; exit 0 ;;
-      --help) usage; exit 0 ;;
+      -v|--version) printf 'wayflipper %s\n' "${VERSION}"; exit 0 ;;
+      -h|--help) usage; exit 0 ;;
       --) shift; break ;;
       -*)
         printf 'Unknown option: %s\n' "$1" >&2
@@ -421,18 +393,15 @@ parse_args() {
 main() {
   parse_args "$@"
 
+  ensure_config
+  load_config
+
   if [ "${LIST_ONLY}" = true ]; then
     list_themes
     exit 0
   fi
 
-  if [ "${PURGE_BACKUPS}" = true ]; then
-    purge_backups
-    exit 0
-  fi
-
   if [ "${BROWSE}" = true ]; then
-    prompt_purge_backups_if_needed
     local last_selection=""
     while true; do
       if ! browse_themes "${last_selection}"; then
