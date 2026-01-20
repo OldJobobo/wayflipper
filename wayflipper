@@ -358,8 +358,7 @@ process_theme() {
     printf 'Dry run complete. Theme "%s" would symlink into %s\n' \
       "${theme_name}" "${WAYBAR_DIR}"
   else
-    printf 'Theme "%s" applied. Waybar symlinks point to %s\n' \
-      "${theme_name}" "${theme_dir}"
+    notify-send -t 1200 "Wayflipper" "Flipped to ${theme_name}"
   fi
 }
 
