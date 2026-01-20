@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.2.2
+- Keep fzf browse UI open while applying themes; Enter applies without closing.
+- Add `--browse-once` for single-apply browse sessions.
+
 ## 0.2.0
 - Keep fzf selection positioned on the last chosen theme when returning to browse mode.
 - Use fzf result event with sync mode to restore cursor position after list load.
