@@ -15,6 +15,7 @@ ACTIVE_STYLE="${WAYBAR_DIR}/style.css"
 DRY_RUN=false
 LIST_ONLY=false
 BROWSE=false
+BROWSE_ONCE=false
 THEME=""
 
 usage() {
@@ -23,11 +24,12 @@ Usage: wayflipper <theme-name> [--dry-run]
        wayflipper --list
        wayflipper --version
        wayflipper --help
-       wayflipper --browse [--dry-run]
+       wayflipper --browse [--dry-run] [--browse-once]
 
 Options:
   -l, --list      List available themes in themes_dir (default ~/.config/waybar/themes)
-  -b, --browse    Interactive selector for themes (fzf if available, else numbered prompt)
+  -b, --browse    Interactive selector for themes (fzf stays open after applying)
+  --browse-once   Exit after applying a selection in browse mode
   --dry-run       Show actions without modifying files
   -v, --version   Show version and exit
   -h, --help      Show this help message
@@ -244,6 +246,116 @@ EOF
   return 0
 }
 
+browse_themes_live() {
+  if [ ! -d "${THEMES_DIR}" ]; then
+    printf 'No themes directory found at %s\n' "${THEMES_DIR}" >&2
+    exit 1
+  fi
+
+  local themes=()
+  local dir
+  for dir in "${THEMES_DIR}"/*; do
+    [ -d "${dir}" ] || continue
+    if [ -f "${dir}/config.jsonc" ] && [ -f "${dir}/style.css" ]; then
+      themes+=("$(basename "${dir}")")
+    fi
+  done
+
+  if [ "${#themes[@]}" -eq 0 ]; then
+    printf 'No valid themes (config.jsonc and style.css) found in %s\n' "${THEMES_DIR}" >&2
+    exit 1
+  fi
+
+  if ! command -v fzf >/dev/null 2>&1; then
+    printf 'fzf not found; using numbered selection (press q to quit).\n' >&2
+    return 1
+  fi
+
+  local preview_cmd
+  preview_cmd=$(cat <<EOF
+bash -c '
+theme_dir="${THEMES_DIR}/{}"
+image=""
+for img in "\${theme_dir}"/*.png "\${theme_dir}"/*.PNG; do
+  [ -e "\${img}" ] || continue
+  image="\${img}"
+  break
+done
+preview_cols="\${FZF_PREVIEW_COLUMNS:-80}"
+preview_lines="\${FZF_PREVIEW_LINES:-20}"
+image_lines=\$((preview_lines * 40 / 100))
+if [ "\${image_lines}" -lt 6 ]; then
+  image_lines=6
+fi
+if [ -n "\${image}" ]; then
+  pad_lines=0
+  if command -v chafa >/dev/null 2>&1; then
+    chafa -f symbols -s "\${preview_cols}x\${image_lines}" "\${image}"
+    pad_lines=0
+  elif command -v kitty >/dev/null 2>&1 && [ -n "\${KITTY_WINDOW_ID:-}" ]; then
+    kitty +kitten icat --clear --transfer-mode=stream --stdin=no \
+      --place="\${preview_cols}x\${image_lines}@0x0" --scale-up "\${image}"
+    pad_lines=\${image_lines}
+  else
+    printf "Image preview requires chafa or kitty: %s\n" "\${image}"
+    pad_lines=1
+  fi
+  if [ "\${pad_lines}" -gt 0 ]; then
+    i=0
+    while [ "\${i}" -lt "\${pad_lines}" ]; do
+      printf "\n"
+      i=\$((i + 1))
+    done
+  fi
+else
+  if command -v kitty >/dev/null 2>&1 && [ -n "\${KITTY_WINDOW_ID:-}" ]; then
+    kitty +kitten icat --clear --transfer-mode=stream --stdin=no
+  fi
+  printf "No preview image found in %s\n" "\${theme_dir}"
+fi
+printf "\n---\n"
+printf "Theme: %s\n\n" "{}"
+printf "=== config.jsonc ===\n"
+if command -v bat >/dev/null 2>&1; then
+  bat --paging=never --color=always --style=plain --language json \
+    --line-range 1:120 "\${theme_dir}/config.jsonc"
+else
+  sed -n "1,120p" "\${theme_dir}/config.jsonc"
+fi
+printf "\n=== style.css ===\n"
+if command -v bat >/dev/null 2>&1; then
+  bat --paging=never --color=always --style=plain --language css \
+    --line-range 1:120 "\${theme_dir}/style.css"
+else
+  sed -n "1,120p" "\${theme_dir}/style.css"
+fi
+'
+EOF
+)
+
+  local self_path self_path_escaped apply_cmd
+  self_path="${0}"
+  self_path_escaped="$(printf '%q' "${self_path}")"
+  apply_cmd=$(cat <<EOF
+bash -c '
+theme="\$1"
+cmd=(${self_path_escaped})
+if [ "${DRY_RUN}" = true ]; then
+  cmd+=("--dry-run")
+fi
+cmd+=("\$theme")
+"\${cmd[@]}"
+' _ {}
+EOF
+)
+
+  printf '%s\n' "${themes[@]}" | fzf --ansi --sync --prompt='Select Waybar theme: ' \
+    --cycle --reverse --bind "q:abort" \
+    --bind "enter:execute-silent(${apply_cmd})" \
+    --border --border-label="Wayflipper v${VERSION}" \
+    --preview="${preview_cmd}" --preview-window='right:75%:wrap:border'
+}
+
 restart_waybar() {
   if [ "${DRY_RUN}" = true ]; then
     printf 'Would run omarchy-restart-waybar\n'
@@ -367,6 +479,7 @@ parse_args() {
     case "$1" in
       -l|--list) LIST_ONLY=true ;;
       -b|--browse) BROWSE=true ;;
+      --browse-once) BROWSE=true; BROWSE_ONCE=true ;;
       --dry-run) DRY_RUN=true ;;
       -v|--version) printf 'wayflipper %s\n' "${VERSION}"; exit 0 ;;
       -h|--help) usage; exit 0 ;;
@@ -402,6 +515,16 @@ main() {
 
   if [ "${BROWSE}" = true ]; then
     local last_selection=""
+    if [ "${BROWSE_ONCE}" = true ]; then
+      if ! browse_themes "${last_selection}"; then
+        exit 0
+      fi
+      process_theme "${THEME}"
+      exit 0
+    fi
+    if browse_themes_live; then
+      exit 0
+    fi
     while true; do
       if ! browse_themes "${last_selection}"; then
         exit 0

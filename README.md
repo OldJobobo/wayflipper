@@ -55,12 +55,13 @@ wayflipper <theme-name> [--dry-run]
 wayflipper --list
 wayflipper --version
 wayflipper --help
-wayflipper --browse [--dry-run]
+wayflipper --browse [--dry-run] [--browse-once]
 ```
 
 ### Options
 - `-l`, `--list` List themes found in `themes_dir` (default `~/.config/waybar/themes`)
-- `-b`, `--browse` Interactive selector for themes (uses `fzf` if available, otherwise a numbered prompt)
+- `-b`, `--browse` Interactive selector for themes (fzf stays open after applying; otherwise a numbered prompt)
+- `--browse-once` Exit after applying a selection in browse mode
 - `--dry-run` Show what would run without changing anything
 - `-v`, `--version` Show the script version
 - `-h`, `--help` Show usage
@@ -70,6 +71,7 @@ wayflipper --browse [--dry-run]
 - Preview a switch: `wayflipper V6.e --dry-run`
 - Apply a theme: `wayflipper V6.e`
 - Browse and apply interactively: `wayflipper --browse`
+- Browse once (no UI reopen): `wayflipper --browse-once`
 
 ## Notes on reload/restart
 - The script calls `omarchy-restart-waybar` after applying a theme. Ensure it is installed
