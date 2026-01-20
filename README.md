@@ -1,11 +1,12 @@
 # Wayflipper
 
-Wayflipper is a Bash utility to flip between Waybar themes on Omarchy/Hyprland setups. It updates Waybar by symlinking a theme’s `config.jsonc` and `style.css` into `~/.config/waybar`.
+Wayflipper is a Bash utility to flip between Waybar themes on Omarchy/Hyprland setups. It updates Waybar by symlinking a theme’s `config.jsonc` and `style.css` into `~/.config/waybar`, plus any optional theme subdirectories (such as `assets/` or `scripts/`).
 
 ## Directory layout
 - Active config: `~/.config/waybar/config.jsonc` (symlink)
 - Active style: `~/.config/waybar/style.css` (symlink)
 - Themes root (default): `~/.config/waybar/themes/<theme-name>/{config.jsonc,style.css}`
+- Optional theme subdirectories (e.g., `assets/`, `scripts/`, or other folders) are symlinked into `~/.config/waybar/` with the same name.
 - Config file: `~/.wayflipper`
 
 Create the themes directory if it does not exist:
@@ -28,6 +29,8 @@ You can edit this file to point at a different themes location. If you set
 If `~/.config/waybar/config.jsonc` or `~/.config/waybar/style.css` are regular files,
 Wayflipper moves them into a theme named `existing-backup` under `themes_dir` before
 creating symlinks. This is a one-time safety move so you can switch back later.
+If a theme adds extra subdirectories, Wayflipper removes those symlinks when switching
+to a new theme unless the new theme provides the same subdirectory.
 
 ## Preserve your current setup as a "default" theme
 It’s a good idea to save your current Waybar configuration before experimenting:
@@ -60,7 +63,7 @@ wayflipper --browse [--dry-run] [--browse-once]
 
 ### Options
 - `-l`, `--list` List themes found in `themes_dir` (default `~/.config/waybar/themes`)
-- `-b`, `--browse` Interactive selector for themes (fzf stays open after applying; otherwise a numbered prompt)
+- `-b`, `--browse` Interactive selector for themes (fzf stays open after applying; Ctrl-Q quits; otherwise a numbered prompt)
 - `--browse-once` Exit after applying a selection in browse mode
 - `--dry-run` Show what would run without changing anything
 - `-v`, `--version` Show the script version

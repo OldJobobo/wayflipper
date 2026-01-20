@@ -4,13 +4,14 @@
 
 set -euo pipefail
 
-VERSION="0.2.2"
+VERSION="0.2.3"
 CONFIG_FILE="${HOME}/.wayflipper"
 WAYBAR_DIR="${HOME}/.config/waybar"
 DEFAULT_THEMES_DIR="${HOME}/.config/waybar/themes"
 THEMES_DIR="${DEFAULT_THEMES_DIR}"
 ACTIVE_CONFIG="${WAYBAR_DIR}/config.jsonc"
 ACTIVE_STYLE="${WAYBAR_DIR}/style.css"
+STATE_FILE="${WAYBAR_DIR}/.wayflipper-links"
 
 DRY_RUN=false
 LIST_ONLY=false
@@ -28,7 +29,7 @@ Usage: wayflipper <theme-name> [--dry-run]
 
 Options:
   -l, --list      List available themes in themes_dir (default ~/.config/waybar/themes)
-  -b, --browse    Interactive selector for themes (fzf stays open after applying)
+  -b, --browse    Interactive selector for themes (fzf stays open after applying; Ctrl-Q quits)
   --browse-once   Exit after applying a selection in browse mode
   --dry-run       Show actions without modifying files
   -v, --version   Show version and exit
@@ -213,11 +214,11 @@ fi
 EOF
 )
     if [ -n "${pos_found}" ]; then
-      fzf_bind="q:abort,result:pos(${pos_found})"
+      fzf_bind="ctrl-q:abort,result:pos(${pos_found})"
     else
-      fzf_bind="q:abort"
+      fzf_bind="ctrl-q:abort"
     fi
-    if ! selection="$(printf '%s\n' "${themes[@]}" | fzf --ansi --sync --prompt='Select Waybar theme: ' --cycle --reverse --bind "${fzf_bind}" --border --border-label="Wayflipper v${VERSION}" --preview="${preview_cmd}" --preview-window='right:75%:wrap:border')"; then
+    if ! selection="$(printf '%s\n' "${themes[@]}" | fzf --ansi --sync --prompt='Select Waybar theme (Ctrl-Q to quit): ' --cycle --reverse --bind "${fzf_bind}" --border --border-label="Wayflipper v${VERSION}" --preview="${preview_cmd}" --preview-window='right:75%:wrap:border')"; then
       return 1
     fi
   else
@@ -349,8 +350,8 @@ cmd+=("\$theme")
 EOF
 )
 
-  printf '%s\n' "${themes[@]}" | fzf --ansi --sync --prompt='Select Waybar theme: ' \
-    --cycle --reverse --bind "q:abort" \
+  printf '%s\n' "${themes[@]}" | fzf --ansi --sync --prompt='Select Waybar theme (Ctrl-Q to quit): ' \
+    --cycle --reverse --bind "ctrl-q:abort" \
     --bind "enter:execute-silent(${apply_cmd})" \
     --border --border-label="Wayflipper v${VERSION}" \
     --preview="${preview_cmd}" --preview-window='right:75%:wrap:border'
@@ -414,19 +415,143 @@ backup_existing_waybar_theme() {
   fi
 }
 
+resolve_path() {
+  local path="$1"
+
+  if [ -z "${path}" ]; then
+    return 1
+  fi
+
+  if [ -d "${path}" ]; then
+    (cd "${path}" && pwd)
+    return 0
+  fi
+
+  local dir
+  dir="$(dirname "${path}")"
+  if [ -d "${dir}" ]; then
+    printf '%s/%s\n' "$(cd "${dir}" && pwd)" "$(basename "${path}")"
+    return 0
+  fi
+
+  return 1
+}
+
+cleanup_previous_symlinks() {
+  if [ ! -f "${STATE_FILE}" ]; then
+    return 0
+  fi
+
+  local state_theme_dir=""
+  local line
+  while IFS= read -r line; do
+    case "${line}" in
+      ""|\#*) continue ;;
+      theme_dir=*)
+        state_theme_dir="${line#theme_dir=}"
+        if [ -n "${state_theme_dir}" ]; then
+          state_theme_dir="$(resolve_path "${state_theme_dir}" || printf '%s' "${state_theme_dir}")"
+        fi
+        ;;
+      *)
+        local target="${line}"
+        if [ -L "${target}" ]; then
+          local link_target
+          link_target="$(readlink "${target}")"
+          if [[ "${link_target}" != /* ]]; then
+            link_target="$(resolve_path "$(dirname "${target}")/${link_target}")"
+          else
+            link_target="$(resolve_path "${link_target}" || printf '%s' "${link_target}")"
+          fi
+          if [ -z "${state_theme_dir}" ] || [[ "${link_target}" == "${state_theme_dir}"/* ]]; then
+            if [ "${DRY_RUN}" = true ]; then
+              printf 'Would remove symlink %s\n' "${target}"
+            else
+              rm -f "${target}"
+            fi
+          fi
+        fi
+        ;;
+    esac
+  done <"${STATE_FILE}"
+
+  if [ "${DRY_RUN}" = true ]; then
+    printf 'Would remove state file %s\n' "${STATE_FILE}"
+    return 0
+  fi
+
+  rm -f "${STATE_FILE}"
+}
+
+list_theme_subdirs() {
+  local theme_dir="$1"
+  local entry
+
+  for entry in "${theme_dir}"/*; do
+    [ -d "${entry}" ] || continue
+    printf '%s\n' "${entry}"
+  done
+}
+
+write_state_file() {
+  local theme_dir="$1"
+  shift
+  local linked_paths=("$@")
+
+  if [ "${DRY_RUN}" = true ]; then
+    if [ "${#linked_paths[@]}" -gt 0 ]; then
+      printf 'Would write state file %s\n' "${STATE_FILE}"
+    fi
+    return 0
+  fi
+
+  if [ "${#linked_paths[@]}" -eq 0 ]; then
+    rm -f "${STATE_FILE}"
+    return 0
+  fi
+
+  {
+    printf 'theme_dir=%s\n' "${theme_dir}"
+    local path
+    for path in "${linked_paths[@]}"; do
+      printf '%s\n' "${path}"
+    done
+  } >"${STATE_FILE}"
+}
+
 apply_theme_symlinks() {
   local theme_dir="$1"
   local config_path="${theme_dir}/config.jsonc"
   local style_path="${theme_dir}/style.css"
+  local linked_paths=()
 
   if [ "${DRY_RUN}" = true ]; then
     printf 'Would symlink %s to %s\n' "${config_path}" "${ACTIVE_CONFIG}"
     printf 'Would symlink %s to %s\n' "${style_path}" "${ACTIVE_STYLE}"
-    return
+  else
+    ln -sfn "${config_path}" "${ACTIVE_CONFIG}"
+    ln -sfn "${style_path}" "${ACTIVE_STYLE}"
   fi
 
-  ln -sfn "${config_path}" "${ACTIVE_CONFIG}"
-  ln -sfn "${style_path}" "${ACTIVE_STYLE}"
+  local subdir
+  while IFS= read -r subdir; do
+    [ -n "${subdir}" ] || continue
+    local target="${WAYBAR_DIR}/$(basename "${subdir}")"
+    if [ -e "${target}" ] && [ ! -L "${target}" ]; then
+      printf 'Cannot symlink %s; target exists and is not a symlink: %s\n' "${subdir}" "${target}" >&2
+      exit 1
+    fi
+    if [ "${DRY_RUN}" = true ]; then
+      printf 'Would symlink %s to %s\n' "${subdir}" "${target}"
+    else
+      ln -sfn "${subdir}" "${target}"
+    fi
+    linked_paths+=("${target}")
+  done < <(list_theme_subdirs "${theme_dir}")
+
+  local resolved_theme_dir
+  resolved_theme_dir="$(resolve_path "${theme_dir}" || printf '%s' "${theme_dir}")"
+  write_state_file "${resolved_theme_dir}" "${linked_paths[@]}"
 }
 
 process_theme() {
@@ -463,6 +588,7 @@ process_theme() {
   fi
 
   backup_existing_waybar_theme
+  cleanup_previous_symlinks
   apply_theme_symlinks "${theme_dir}"
   restart_waybar
 
@@ -522,7 +648,9 @@ main() {
       process_theme "${THEME}"
       exit 0
     fi
-    if browse_themes_live; then
+    browse_themes_live
+    local browse_status=$?
+    if [ "${browse_status}" -eq 0 ] || [ "${browse_status}" -eq 130 ]; then
       exit 0
     fi
     while true; do

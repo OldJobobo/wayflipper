@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.2.3
+- Symlink theme subdirectories (e.g., assets/scripts) into Waybar and remove them on theme switch.
+- Quit browse mode with Ctrl-Q so q is available for search.
+
 ## 0.2.2
 - Keep fzf browse UI open while applying themes; Enter applies without closing.
 - Add `--browse-once` for single-apply browse sessions.
